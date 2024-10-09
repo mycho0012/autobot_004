@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import pyupbit
 import requests
 import logging
-import pandas_ta as ta
 import uuid  # Trade ID 생성을 위해 사용
 from dotenv import load_dotenv
 
@@ -83,6 +82,14 @@ def log_to_notion(trade: dict):
     except Exception as e:
         logger.error(f"Exception in log_to_notion: {e}")
 
+def calculate_atr(high, low, close, period):
+    """ATR (Average True Range) 계산 함수"""
+    tr = pd.concat([high - low, 
+                    abs(high - close.shift(1)), 
+                    abs(low - close.shift(1))], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    return atr
+
 class MRHATradingSystem:
     def __init__(self, symbol, interval, count, atr_period=14):
         self.symbol = symbol
@@ -142,9 +149,8 @@ class MRHATradingSystem:
         signals['Ebl'] = calculate_ebl(self.mrha_data['mh_open'], self.stock_data['High'])
         signals['Strg'] = calculate_strg(signals['Ebl'])
 
-        # ATR 계산 (pandas_ta 사용)
-        atr = ta.atr(high=self.stock_data['High'], low=self.stock_data['Low'], close=self.stock_data['Close'], length=self.atr_period)
-        signals['ATR'] = atr
+        # ATR 계산 (pandas_ta 대신 직접 구현한 함수 사용)
+        signals['ATR'] = calculate_atr(self.stock_data['High'], self.stock_data['Low'], self.stock_data['Close'], self.atr_period)
 
         # Stop Loss 및 Take Profit 레벨 설정 (ATR 기반)
         signals['Stop_Loss'] = self.mrha_data['mh_close'] - (signals['ATR'] * 1.5)
