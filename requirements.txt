@@ -3,5 +3,4 @@ pandas
 numpy
 pyupbit
 python-dotenv
-pandas_ta
 
