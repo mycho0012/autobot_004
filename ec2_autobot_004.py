@@ -17,11 +17,10 @@ UPBIT_ACCESS_KEY = os.getenv('UPBIT_ACCESS_KEY')
 UPBIT_SECRET_KEY = os.getenv('UPBIT_SECRET_KEY')
 NOTION_API_TOKEN = os.getenv('NOTION_API_TOKEN')
 NOTION_DATABASE_ID = os.getenv('NOTION_DATABASE_ID')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL')  # Telegram 관련 변수 제거
 
 # 필수 환경 변수 검증
-required_env_vars = ['UPBIT_ACCESS_KEY', 'UPBIT_SECRET_KEY', 'NOTION_API_TOKEN', 'NOTION_DATABASE_ID', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
+required_env_vars = ['UPBIT_ACCESS_KEY', 'UPBIT_SECRET_KEY', 'NOTION_API_TOKEN', 'NOTION_DATABASE_ID', 'SLACK_WEBHOOK_URL']
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     raise EnvironmentError(f"Missing environment variables: {', '.join(missing_vars)}")
@@ -35,20 +34,22 @@ logging.basicConfig(level=logging.INFO,
                     ])
 logger = logging.getLogger()
 
-def send_telegram_message(message: str):
-    """텔레그램 메시지 전송 함수"""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        return  # 텔레그램 설정이 없으면 무시
+def send_slack_message(message: str):
+    """Slack 메시지 전송 함수"""
+    if not SLACK_WEBHOOK_URL:
+        logger.error("Slack Webhook URL이 설정되지 않았습니다.")
+        return
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        data = {'chat_id': TELEGRAM_CHAT_ID, 'text': message}
-        response = requests.post(url, data=data)
+        payload = {
+            "text": message
+        }
+        response = requests.post(SLACK_WEBHOOK_URL, json=payload)
         if response.status_code != 200:
-            logger.error(f"Telegram 메시지 전송 실패: {response.text}")
+            logger.error(f"Slack 메시지 전송 실패: {response.status_code}, {response.text}")
         else:
-            logger.info("Telegram 메시지 전송 완료")
+            logger.info("Slack 메시지 전송 완료")
     except Exception as e:
-        logger.error(f"Telegram 메시지 전송 중 예외 발생: {e}")
+        logger.error(f"Slack 메시지 전송 중 예외 발생: {e}")
 
 def log_to_notion(trade: dict):
     """Notion 데이터베이스에 거래 기록"""
@@ -88,7 +89,7 @@ def log_to_notion(trade: dict):
             logger.error(f"Notion 데이터베이스 업데이트 실패: {response.text}")
         else:
             logger.info("Notion 데이터베이스 업데이트 완료")
-            send_telegram_message("Notion 데이터베이스에 거래가 기록되었습니다.")
+            send_slack_message("Notion 데이터베이스에 거래가 기록되었습니다.")
     except Exception as e:
         logger.error(f"Notion 데이터베이스에 기록 중 예외 발생: {e}")
 
@@ -136,7 +137,7 @@ def update_notion_trade(trade_id: str, exit_price: float, exit_time: datetime, p
             logger.error(f"Notion 데이터베이스 업데이트 실패: {update_response.text}")
         else:
             logger.info("Notion 데이터베이스 거래 업데이트 완료")
-            send_telegram_message(f"Notion 데이터베이스에서 Trade ID: {trade_id}의 거래가 업데이트되었습니다.")
+            send_slack_message(f"Notion 데이터베이스에서 Trade ID: {trade_id}의 거래가 업데이트되었습니다.")
     except Exception as e:
         logger.error(f"Notion 데이터베이스 업데이트 중 예외 발생: {e}")
 
@@ -356,14 +357,14 @@ class TradingBot:
                     # Stop Loss 및 Take Profit 검증
                     if not self.current_trade['Volume'] or not self.current_trade['Stop Loss'] or not self.current_trade['Take Profit']:
                         logger.error("매수 후 거래 정보 누락: Volume, Stop Loss 또는 Take Profit이 설정되지 않았습니다.")
-                        send_telegram_message("매수 후 거래 정보 누락: Volume, Stop Loss 또는 Take Profit이 설정되지 않았습니다.")
+                        send_slack_message("매수 후 거래 정보 누락: Volume, Stop Loss 또는 Take Profit이 설정되지 않았습니다.")
                         self.current_trade = None
                         return
                     log_to_notion(self.current_trade)
-                    send_telegram_message(
+                    send_slack_message(
                         f"매수 완료: {bought_amount:.6f} BTC @ {current_price:.2f} KRW"
                     )
-                    logger.info(f"매수 주문 완료: {bought_amount} BTC @ {current_price} KRW")
+                    logger.info(f"매수 주문 완료: {bought_amount} BTC @ {current_price:.2f} KRW")
             except Exception as e:
                 logger.error(f"매수 주문 실패: {e}")
 
@@ -396,7 +397,7 @@ class TradingBot:
                         reason_for_exit=reason_for_exit
                     )
 
-                    send_telegram_message(
+                    send_slack_message(
                         f"매도 완료: {sold_amount:.6f} BTC @ {exit_price:.2f} KRW | MTM: {profit_loss:.2f} KRW"
                     )
                     logger.info(f"매도 주문 완료: {sold_amount} BTC @ {exit_price:.2f} KRW | MTM: {profit_loss:.2f} KRW")
@@ -408,7 +409,7 @@ class TradingBot:
 
     def run(self):
         logger.info("트레이딩 봇 시작")
-        send_telegram_message("MRHA Trading Strategy 시작되었습니다.")
+        send_slack_message("MRHA Trading Strategy 시작되었습니다.")
 
         while True:
             try:
@@ -422,7 +423,7 @@ class TradingBot:
                     # 거래가 이미 실행된 날인지 확인
                     if self.last_trade_date != today_date:
                         logger.info("새로운 캔들 업데이트 감지. 트레이딩 로직 실행 중...")
-                        send_telegram_message("새로운 캔들이 생성되었습니다. MRHA Trading Strategy를 실행합니다.")
+                        send_slack_message("새로운 캔들이 생성되었습니다. MRHA Trading Strategy를 실행합니다.")
 
                         # 데이터 다운로드 및 분석
                         self.trading_system.run_analysis()
@@ -430,7 +431,7 @@ class TradingBot:
                         # 이전 캔들의 신호 확인 (마지막 캔들이 새로운 캔들이기 때문에 이전 캔들을 참조)
                         if 'Signal' not in self.trading_system.mrha_data.columns or len(self.trading_system.mrha_data['Signal']) < 2:
                             logger.warning("신호 데이터가 부족하여 트레이딩을 실행하지 않습니다.")
-                            send_telegram_message("신호 데이터가 부족하여 트레이딩을 실행하지 않습니다.")
+                            send_slack_message("신호 데이터가 부족하여 트레이딩을 실행하지 않습니다.")
                             time.sleep(60)
                             continue
 
@@ -444,7 +445,7 @@ class TradingBot:
                         # Stop Loss 및 Take Profit 검증
                         if stop_loss is None or take_profit is None:
                             logger.error("Stop Loss 또는 Take Profit 정보가 누락되었습니다. 매도 신호를 무시합니다.")
-                            send_telegram_message("Stop Loss 또는 Take Profit 정보가 누락되었습니다. 매도 신호를 무시합니다.")
+                            send_slack_message("Stop Loss 또는 Take Profit 정보가 누락되었습니다. 매도 신호를 무시합니다.")
                             time.sleep(60)
                             continue
 
@@ -458,9 +459,9 @@ class TradingBot:
                         else:
                             mtm = 0.0
 
-                        # Telegram 메시지 작성
+                        # Slack 메시지 작성
                         if self.current_trade:
-                            telegram_message = (
+                            slack_message = (
                                 f"MRHA Trading Strategy 실행됨\n"
                                 f"현재 시각: {now_kst.strftime('%Y-%m-%d %H:%M:%S')}\n"
                                 f"신호 상태: {'매수 신호 있음' if previous_signal == 1 else ('매도 신호 있음' if previous_signal == -1 else '신호 없음')}\n"
@@ -470,7 +471,7 @@ class TradingBot:
                                 f"MTM: {mtm:.2f} KRW"
                             )
                         else:
-                            telegram_message = (
+                            slack_message = (
                                 f"MRHA Trading Strategy 실행됨\n"
                                 f"현재 시각: {now_kst.strftime('%Y-%m-%d %H:%M:%S')}\n"
                                 f"신호 상태: {'매수 신호 있음' if previous_signal == 1 else ('매도 신호 있음' if previous_signal == -1 else '신호 없음')}\n"
@@ -479,7 +480,7 @@ class TradingBot:
                                 f"보유 BTC 수량: 0.000000 BTC\n"
                                 f"MTM: {mtm:.2f} KRW"
                             )
-                        send_telegram_message(telegram_message)
+                        send_slack_message(slack_message)
                         logger.info(f"이전 신호: {previous_signal}, 현재 가격: {current_price}, MTM: {mtm}")
 
                         # 매수/매도 조건 평가 및 실행
@@ -503,10 +504,11 @@ class TradingBot:
                         logger.info(f"오늘({today_date}) 이미 트레이딩이 실행되었습니다. 대기 중...")
                         time.sleep(60)  # 이미 실행된 경우 1분 대기
             except Exception as e:
-                    logger.error(f"예기치 않은 오류 발생: {e}")
-                    send_telegram_message(f"오류 발생: {e}")
-                    time.sleep(60)  # 오류 발생 시 잠시 대기 후 재시도
+                logger.error(f"예기치 않은 오류 발생: {e}")
+                send_slack_message(f"오류 발생: {e}")
+                time.sleep(60)  # 오류 발생 시 잠시 대기 후 재시도
 
 if __name__ == "__main__":
     bot = TradingBot()
     bot.run()
+
